@@ -1,0 +1,49 @@
+{
+  "name": "groweazzy",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint . --max-warnings=0",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "bash ops/migrate.sh",
+    "db:studio": "drizzle-kit studio",
+    "seed:catalogue": "tsx src/lib/db/seed/catalogue.ts",
+    "seed:demo": "tsx src/lib/db/seed/demo.ts"
+  },
+  "dependencies": {
+    "argon2": "^0.41.1",
+    "drizzle-orm": "^0.45.2",
+    "next": "16.3.4",
+    "postgres": "^3.4.5",
+    "razorpay": "^2.9.5",
+    "react": "19.0.0",
+    "react-dom": "19.0.0",
+    "sanitize-html": "^2.17.7",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.0.0",
+    "@types/node": "^22.10.2",
+    "@types/react": "^19.0.2",
+    "@types/react-dom": "^19.0.2",
+    "@types/sanitize-html": "^2.16.1",
+    "drizzle-kit": "^0.31.10",
+    "eslint": "^9.17.0",
+    "eslint-config-next": "16.3.4",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^4.0.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^5.0.0"
+  }
+}

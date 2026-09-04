@@ -1,0 +1,12 @@
+@import "tailwindcss";
+
+:root {
+  --ge-bg: #0b0f14;
+  --ge-fg: #f4f6f8;
+  --ge-accent: #22c55e;
+}
+
+body {
+  background: #ffffff;
+  color: #111827;
+}
