@@ -18,26 +18,49 @@ this environment (e.g. needs real credentials this session doesn't have).
 - ✅ Prices are read server-side from the database; the client only says
   which plan, never what it costs — verified: the displayed price on
   `/ai-content-avatar` matches `service_plans.price_paise` exactly.
-- ⛔ Payment success is never trusted from the frontend — **no Razorpay
-  integration exists yet**, so this rule has nothing to violate yet, but
-  also nothing enforcing it in a real payment flow.
-- ⛔ Webhook signature verification over the raw body — not built (no
-  webhook endpoint exists).
-- ⛔ Webhook idempotency inbox — table exists (`webhook_events`), nothing
-  writes to it yet.
+- ✅ Payment success is never trusted from the frontend — a payment is
+  marked CAPTURED only inside the webhook route after signature
+  verification; the checkout page's "simulate payment" action POSTs a
+  signed delivery to the real webhook endpoint over HTTP rather than
+  calling an internal function directly, so this rule is actually
+  enforced along the only path that exists. ⚠️ Only exercised against the
+  Mock gateway — Razorpay's real webhook format has never been received
+  (no credentials, see STATUS.md).
+- ✅ Webhook signature verification over the raw body — verified live:
+  `request.text()` (never `.json()`) is what's signed/verified; a
+  tampered body or wrong signature is rejected with 400, over real HTTP.
+- ✅ Webhook idempotency inbox — verified: a byte-identical replay returns
+  `{"status":"already processed"}` and writes zero duplicate rows, both
+  via direct handler invocation and live HTTP.
 - ✅ `PAYMENT_MODE` has no default and is cross-checked against the
   Razorpay key prefix at boot — verified with unit tests.
-- ✅ Middleware is not the security boundary — no middleware exists yet
-  that makes any authorization decision; every authenticated page
-  (`/account`) re-resolves the actor from the database. Revisit this item
-  when middleware is added.
+- ✅ Middleware (`src/proxy.ts` — Next 16 renamed the file convention) is
+  not the security boundary: it only hands off `?ref=` to a Node route
+  and makes no authorization decision; every authenticated page
+  (`/account`, `/checkout/[orderId]`) re-resolves the actor from the
+  database independently. Revisit this item once more authenticated
+  surfaces exist (Phases 6/7/9 beyond what's built).
 - ✅ Sessions are database rows storing only `sha256(token)`, not JWTs —
   verified.
 - ✅ Account enumeration closed on login (byte-identical failure shape for
   unknown email vs. wrong password) — verified with tests.
-- ⛔ MFA enforcement in the actor guard — not built (Phase 12).
+- ⛔ MFA enforcement in the actor guard — not built (Phase 12). No
+  enrollment UI exists, so no account can ever set `mfaEnabledAt`.
 - ⛔ Commission release scheduler with a dedicated-connection advisory
-  lock — not built (Phase 12).
+  lock — not built (Phase 12). Every EARNING entry is written PENDING and
+  never advances to AVAILABLE, so nothing is currently payable to any
+  affiliate regardless of how much they've earned — see STATUS.md's
+  scope note. The earned/reversed *amounts* are correct and tested; only
+  the release mechanism is missing.
+- ✅ Partial refunds reverse a *proportional* share of commission, derived
+  from the provider's cumulative `amount_refunded` (never a locally
+  incremented counter) — verified: a second refund webhook with a larger
+  cumulative amount reverses only the additional delta; a same-amount
+  replay reverses nothing further; a full refund reverses exactly the
+  amount earned, no more.
+- ✅ A payment without a provider `order_id` cannot be captured — order
+  creation always creates the provider order before a payment can exist
+  against it; verified in the order-creation tests.
 
 ## HIGH
 
@@ -50,11 +73,18 @@ this environment (e.g. needs real credentials this session doesn't have).
   exists; no upload endpoint exists yet to populate it correctly.
 - ⛔ Audit log writes on denial, not just success — `audit_logs` table
   exists; nothing writes to it yet.
-- ⛔ Razorpay Route/split settlement avoided — moot until Razorpay exists,
-  but the architecture decision is recorded in `docs/ARCHITECTURE.md` §7
-  before any payment code is written, specifically to avoid this trap.
+- ✅ Razorpay Route/split settlement avoided by design — the
+  `PaymentGateway` interface only ever collects (`createOrder` +
+  webhook); there is no split-settlement code path to accidentally reach
+  for. `docs/ARCHITECTURE.md` §7 records the decision. ⚠️ Disbursement
+  (RazorpayX/Cashfree Payouts) itself is not built — moot until the
+  Phase 12 scheduler makes anything payable.
 - ⛔ `/api/ready` checking database, config, and the money-invariant
   indexes — not built (Phase 11).
+- ⚠️ Self-referral (an affiliate buying through their own link) is
+  blocked in `createOrder` — verified with a test — but there is no
+  equivalent check yet for an affiliate referring a second account they
+  also control (would require identity/fraud signals not built).
 - ⚠️ `npm audit`: 0 critical/high vulnerabilities as of this build (fixed
   Next.js CVE-2025-66478, drizzle-orm's SQLi GHSA-gpj5-g38j-94v9, and
   vitest's arbitrary-file-read chain during setup) — re-run before every

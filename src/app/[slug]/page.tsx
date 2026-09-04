@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { getServiceBySlug } from "@/lib/repository";
 import { formatPaiseAsInr } from "@/lib/money";
+import { checkoutAction } from "./actions";
 
 // This route must resolve any published service slug on any public URL,
 // including one carrying `?ref=` — the attribution requirement in
@@ -44,9 +45,21 @@ export default async function ServiceDetailPage({
             <div>
               <p className="font-medium text-gray-900">{plan.name}</p>
             </div>
-            {/* Price is read server-side from the database (Rule 4) — this
-                is exactly the string the checkout flow would charge. */}
-            <p className="text-lg font-semibold text-gray-900">{formatPaiseAsInr(plan.pricePaise)}</p>
+            <div className="flex items-center gap-4">
+              {/* Price is read server-side from the database (Rule 4) —
+                  this is exactly the string the checkout flow would charge. */}
+              <p className="text-lg font-semibold text-gray-900">{formatPaiseAsInr(plan.pricePaise)}</p>
+              <form action={checkoutAction}>
+                <input type="hidden" name="servicePlanId" value={plan.id} />
+                <input type="hidden" name="serviceSlug" value={service.slug} />
+                <button
+                  type="submit"
+                  className="rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-700"
+                >
+                  Buy
+                </button>
+              </form>
+            </div>
           </div>
         ))}
       </div>

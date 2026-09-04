@@ -10,8 +10,11 @@ import {
   services,
   servicePlans,
   orders,
+  payments,
   affiliates,
   affiliateConversions,
+  affiliateLinks,
+  affiliateClicks,
 } from "@/lib/db/schema";
 import { hashPassword } from "@/lib/auth/password";
 
@@ -62,12 +65,50 @@ export async function createTestOrder(userId: string, servicePlanId: string, amo
   return row.id;
 }
 
-export async function createTestAffiliate(userId: string) {
+export async function createTestAffiliate(userId: string, status: "ACTIVE" | "SUSPENDED" | "REGISTERED" = "REGISTERED") {
   const db = getDb();
   const code = `AFF${randomUUID().slice(0, 8).toUpperCase()}`;
-  const [row] = await db.insert(affiliates).values({ userId, code }).returning({ id: affiliates.id });
+  const [row] = await db.insert(affiliates).values({ userId, code, status }).returning({ id: affiliates.id });
   if (!row) throw new Error("failed to create test affiliate");
   return { id: row.id, code };
+}
+
+export async function createTestAffiliateLink(affiliateId: string, serviceSlug = "test-service") {
+  const db = getDb();
+  const refCode = `REF${randomUUID().slice(0, 10).toUpperCase()}`;
+  const [row] = await db
+    .insert(affiliateLinks)
+    .values({ affiliateId, serviceSlug, refCode })
+    .returning({ id: affiliateLinks.id });
+  if (!row) throw new Error("failed to create test affiliate link");
+  return { id: row.id, refCode };
+}
+
+export async function createTestAffiliateClick(affiliateLinkId: string) {
+  const db = getDb();
+  const clickToken = randomUUID();
+  const [row] = await db
+    .insert(affiliateClicks)
+    .values({ affiliateLinkId, clickToken, landingUrl: "/test" })
+    .returning({ id: affiliateClicks.id });
+  if (!row) throw new Error("failed to create test affiliate click");
+  return { id: row.id, clickToken };
+}
+
+export async function createTestPayment(params: { orderId: string; payerUserId: string; amountPaise: number; providerOrderId?: string }) {
+  const db = getDb();
+  const [row] = await db
+    .insert(payments)
+    .values({
+      purpose: "SERVICE_ORDER",
+      payerUserId: params.payerUserId,
+      orderId: params.orderId,
+      amountPaise: params.amountPaise,
+      providerOrderId: params.providerOrderId ?? `mock_order_${randomUUID()}`,
+    })
+    .returning({ id: payments.id, providerOrderId: payments.providerOrderId });
+  if (!row) throw new Error("failed to create test payment");
+  return { id: row.id, providerOrderId: row.providerOrderId! };
 }
 
 export async function createTestConversion(affiliateId: string, orderId: string, orderAmountPaise: number) {
