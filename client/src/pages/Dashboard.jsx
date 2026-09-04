@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../api.js';
 import { parseCsv, rowsToProspects } from '../csv.js';
+import { avatarHue, initials, timeAgo } from '../utils.js';
 
 const STAGE_LABELS = {
   new: 'New',
@@ -81,8 +82,46 @@ export default function Dashboard() {
     return acc;
   }, {});
 
+  const stats = useMemo(() => {
+    const total = prospects.length;
+    const oneWeekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    const dmsSentThisWeek = prospects.filter(
+      (p) => p.stage !== 'new' && new Date(`${p.updated_at.replace(' ', 'T')}Z`).getTime() >= oneWeekAgo
+    ).length;
+    const warm = byStage.warm.length;
+    const callsBooked = byStage.call_booked.length;
+    const contacted = total - byStage.new.length;
+    const conversionRate = contacted > 0 ? Math.round((callsBooked / contacted) * 100) : 0;
+    return { total, dmsSentThisWeek, warm, callsBooked, conversionRate };
+  }, [prospects, byStage]);
+
   return (
     <div className="dashboard">
+      {!loading && stats.total > 0 && (
+        <div className="stats-bar">
+          <div className="stat">
+            <div className="stat-value">{stats.total}</div>
+            <div className="stat-label">Total prospects</div>
+          </div>
+          <div className="stat">
+            <div className="stat-value">{stats.dmsSentThisWeek}</div>
+            <div className="stat-label">Active this week</div>
+          </div>
+          <div className="stat">
+            <div className="stat-value warm">{stats.warm}</div>
+            <div className="stat-label">Warm 🔥</div>
+          </div>
+          <div className="stat">
+            <div className="stat-value good">{stats.callsBooked}</div>
+            <div className="stat-label">Calls booked</div>
+          </div>
+          <div className="stat">
+            <div className="stat-value">{stats.conversionRate}%</div>
+            <div className="stat-label">Contact → call rate</div>
+          </div>
+        </div>
+      )}
+
       <div className="dashboard-header">
         <h1>Pipeline</h1>
         <div className="header-actions">
@@ -163,6 +202,14 @@ export default function Dashboard() {
 
       {loading ? (
         <p>Loading…</p>
+      ) : stats.total === 0 ? (
+        <div className="card welcome">
+          <h2>Welcome 👋</h2>
+          <p>
+            Your pipeline is empty. Add your first prospect above, or import a shortlist via
+            CSV, to get started.
+          </p>
+        </div>
       ) : (
         <div className="board">
           {STAGE_ORDER.map((stage) => (
@@ -174,14 +221,24 @@ export default function Dashboard() {
               <div className="column-body">
                 {byStage[stage].map((p) => (
                   <Link className="prospect-card" to={`/prospects/${p.id}`} key={p.id}>
-                    <div className="handle">@{p.handle}</div>
-                    {p.name && <div className="name">{p.name}</div>}
-                    {p.niche && <div className="niche">{p.niche}</div>}
-                    {p.icp_score != null && (
-                      <div className={`score ${p.icp_score >= 70 ? 'good' : p.icp_score >= 40 ? 'mid' : 'low'}`}>
-                        ICP fit: {p.icp_score}
+                    <div className="prospect-card-top">
+                      <div className="avatar" style={{ background: `hsl(${avatarHue(p.handle)}, 45%, 30%)` }}>
+                        {initials(p)}
                       </div>
-                    )}
+                      <div className="prospect-card-id">
+                        <div className="handle">@{p.handle}</div>
+                        {p.name && <div className="name">{p.name}</div>}
+                      </div>
+                    </div>
+                    {p.niche && <div className="niche">{p.niche}</div>}
+                    <div className="prospect-card-footer">
+                      {p.icp_score != null && (
+                        <span className={`score ${p.icp_score >= 70 ? 'good' : p.icp_score >= 40 ? 'mid' : 'low'}`}>
+                          {p.icp_score}
+                        </span>
+                      )}
+                      <span className="updated">{timeAgo(p.updated_at)}</span>
+                    </div>
                   </Link>
                 ))}
                 {byStage[stage].length === 0 && <div className="empty">Nothing here</div>}

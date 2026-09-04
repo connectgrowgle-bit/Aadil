@@ -7,7 +7,9 @@ export default function App() {
   return (
     <div className="app">
       <header className="topbar">
-        <div className="brand">Outreach Pipeline</div>
+        <div className="brand">
+          <span className="brand-mark">◆</span> Outreach Pipeline
+        </div>
         <nav>
           <NavLink to="/" end>
             Pipeline
