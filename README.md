@@ -21,7 +21,9 @@ DMs anyway.
 ## How the workflow maps to the app
 
 1. **Search & shortlist** — you (or a VA) find prospects manually via Instagram
-   search/hashtags/competitor followers and add their handle + bio to the pipeline.
+   search/hashtags/competitor followers and add their handle + bio to the pipeline,
+   one at a time or in bulk via **Import CSV** (header row: `handle` required, plus
+   optional `name`, `niche`, `bio`, `notes`).
 2. **Check their profile** — click "AI: Score ICP fit" to have Claude evaluate the
    prospect against your ideal-client profile (configured in Settings).
 3. **Send a personalized DM** — click "Draft opener" to generate a personalized

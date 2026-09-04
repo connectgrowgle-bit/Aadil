@@ -17,6 +17,8 @@ export const api = {
   listProspects: (stage) => request(`/prospects${stage ? `?stage=${stage}` : ''}`),
   getProspect: (id) => request(`/prospects/${id}`),
   createProspect: (data) => request('/prospects', { method: 'POST', body: JSON.stringify(data) }),
+  bulkImportProspects: (prospects) =>
+    request('/prospects/bulk', { method: 'POST', body: JSON.stringify({ prospects }) }),
   updateProspect: (id, data) => request(`/prospects/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   deleteProspect: (id) => request(`/prospects/${id}`, { method: 'DELETE' }),
 

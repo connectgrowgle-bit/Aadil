@@ -53,6 +53,50 @@ router.post('/', (req, res) => {
   }
 });
 
+// Bulk import prospects, e.g. from a CSV a VA hands you after sourcing/shortlisting
+// handles manually. Expects { prospects: [{ handle, name?, bio?, niche?, notes? }] }.
+// Invalid rows and duplicate handles are skipped, not fatal to the whole batch.
+router.post('/bulk', (req, res) => {
+  const { prospects } = req.body;
+  if (!Array.isArray(prospects) || prospects.length === 0) {
+    return res.status(400).json({ error: 'prospects must be a non-empty array' });
+  }
+  if (prospects.length > 500) {
+    return res.status(400).json({ error: 'Import at most 500 prospects at a time' });
+  }
+
+  const insert = db.prepare(
+    `INSERT INTO prospects (handle, name, bio, niche, notes) VALUES (?, ?, ?, ?, ?)`
+  );
+
+  let created = 0;
+  const skipped = [];
+
+  const insertAll = db.transaction((rows) => {
+    for (const row of rows) {
+      const rawHandle = row?.handle;
+      if (!rawHandle || typeof rawHandle !== 'string' || !rawHandle.trim()) {
+        skipped.push({ handle: rawHandle ?? '', reason: 'missing handle' });
+        continue;
+      }
+      const cleanHandle = rawHandle.replace(/^@/, '').trim().toLowerCase();
+      try {
+        insert.run(cleanHandle, row.name || null, row.bio || null, row.niche || null, row.notes || null);
+        created += 1;
+      } catch (err) {
+        skipped.push({
+          handle: cleanHandle,
+          reason: String(err.message).includes('UNIQUE') ? 'already in pipeline' : 'insert failed',
+        });
+      }
+    }
+  });
+
+  insertAll(prospects);
+
+  res.status(201).json({ created, skipped });
+});
+
 router.get('/:id', (req, res) => {
   const prospect = getProspectOr404(req, res);
   if (!prospect) return;

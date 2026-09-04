@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../api.js';
+import { parseCsv, rowsToProspects } from '../csv.js';
 
 const STAGE_LABELS = {
   new: 'New',
@@ -20,6 +21,9 @@ export default function Dashboard() {
   const [error, setError] = useState('');
   const [form, setForm] = useState({ handle: '', name: '', niche: '', bio: '', notes: '' });
   const [showForm, setShowForm] = useState(false);
+  const [importResult, setImportResult] = useState(null);
+  const [importing, setImporting] = useState(false);
+  const fileInputRef = useRef(null);
 
   async function load() {
     setLoading(true);
@@ -49,6 +53,29 @@ export default function Dashboard() {
     }
   }
 
+  async function handleCsvSelected(e) {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // allow re-selecting the same file later
+    if (!file) return;
+
+    setImportResult(null);
+    setError('');
+    setImporting(true);
+    try {
+      const text = await file.text();
+      const rows = parseCsv(text);
+      const prospects = rowsToProspects(rows);
+      if (prospects.length === 0) throw new Error('No data rows found in that CSV');
+      const result = await api.bulkImportProspects(prospects);
+      setImportResult(result);
+      load();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setImporting(false);
+    }
+  }
+
   const byStage = STAGE_ORDER.reduce((acc, stage) => {
     acc[stage] = prospects.filter((p) => p.stage === stage);
     return acc;
@@ -58,12 +85,45 @@ export default function Dashboard() {
     <div className="dashboard">
       <div className="dashboard-header">
         <h1>Pipeline</h1>
-        <button className="primary" onClick={() => setShowForm((s) => !s)}>
-          {showForm ? 'Cancel' : '+ Add prospect'}
-        </button>
+        <div className="header-actions">
+          <input
+            type="file"
+            accept=".csv,text/csv"
+            ref={fileInputRef}
+            onChange={handleCsvSelected}
+            hidden
+          />
+          <button disabled={importing} onClick={() => fileInputRef.current?.click()}>
+            {importing ? 'Importing…' : 'Import CSV'}
+          </button>
+          <button className="primary" onClick={() => setShowForm((s) => !s)}>
+            {showForm ? 'Cancel' : '+ Add prospect'}
+          </button>
+        </div>
       </div>
 
+      <p className="hint">
+        CSV import expects a header row with a <code>handle</code> column (required) plus
+        optional <code>name</code>, <code>niche</code>, <code>bio</code>, <code>notes</code> columns.
+      </p>
+
       {error && <div className="banner error">{error}</div>}
+
+      {importResult && (
+        <div className="banner success">
+          Imported {importResult.created} prospect{importResult.created === 1 ? '' : 's'}.
+          {importResult.skipped.length > 0 && (
+            <>
+              {' '}
+              Skipped {importResult.skipped.length}: {importResult.skipped
+                .slice(0, 5)
+                .map((s) => `@${s.handle || '(blank)'} (${s.reason})`)
+                .join(', ')}
+              {importResult.skipped.length > 5 ? '…' : ''}
+            </>
+          )}
+        </div>
+      )}
 
       {showForm && (
         <form className="card add-form" onSubmit={handleAdd}>

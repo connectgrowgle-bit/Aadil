@@ -140,10 +140,25 @@ textarea {
   font-size: 13px;
 }
 
+.banner.success {
+  background: rgba(123, 216, 143, 0.12);
+  border: 1px solid var(--accent-2);
+  color: var(--accent-2);
+  padding: 10px 14px;
+  border-radius: 8px;
+  margin-bottom: 16px;
+  font-size: 13px;
+}
+
 .dashboard-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
+}
+
+.header-actions {
+  display: flex;
+  gap: 10px;
 }
 
 .add-form {
