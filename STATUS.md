@@ -1,16 +1,23 @@
 # GrowEazzy — Build Status
 
-Last updated: 2026-09-05 (session 3). This is a partial build against the
-full 13-phase GrowEazzy spec — Phases 0–2 and 1 fully, plus real slices of
-Phases 4, 5, 6, 7, and (as of this session) a real slice of Phase 12's
-commission scheduler, built and verified across three sessions against a
-real PostgreSQL 16 instance. **It is not production ready.** Phases 3, 8,
-9, 10, 11, and 13 do not exist yet, MFA/rate-limiting from Phase 12 don't
-exist either, and the phases that do exist are narrower than their full
-spec scope — see below for exactly what's covered. Nothing marked ✅ is a
-simulation described as if it were real: every one was run against a live
-database, and the payment/webhook/cron paths were also exercised over
-real HTTP with a live server.
+Last updated: 2026-09-05 (session 3, continued). This is a partial build
+against the full 13-phase GrowEazzy spec — Phases 0–2 and 1 fully, plus
+real slices of Phases 4, 5, 6, 7, and 12, built and verified across three
+sessions against a real PostgreSQL 16 instance. **It is not production
+ready.** Phases 3, 8, 9, 10, 11, and 13 do not exist yet, MFA/rate-limiting
+from Phase 12 don't exist either, and the phases that do exist are
+narrower than their full spec scope — see below for exactly what's
+covered. Nothing marked ✅ is a simulation described as if it were real:
+every one was run against a live database, and the payment/webhook/cron/
+payout paths were also exercised over real HTTP with a live server.
+
+**As of this update, money moves all the way through the system for the
+first time**: a click is attributed → an order is placed and paid →
+commission is earned → held → released → claimed into a payout →
+approved → marked paid — every step real, tested, and (for the HTTP-facing
+steps) verified live with `curl` against a running server, right down to
+the final ₹1,900 net payout landing in the database with the correct 5%
+TDS deducted.
 
 ## What's built and verified
 
@@ -34,9 +41,10 @@ real HTTP with a live server.
 | **Commission release scheduler** (Phase 12) | ✅ | `releaseMaturedCommissions()`: dedicated-connection advisory lock (verified two concurrent runs never both process the same entries), per-entry row lock + repeated WHERE, re-verifies conversion/affiliate/payout-claim state from source. A held entry now genuinely reaches AVAILABLE — commission is actually payable end to end for the first time |
 | **Reversal/release race correctness** | ✅ | A refund landing concurrently with release, a reversal written before release, and a reversal written after release were all tested against real concurrent execution (`Promise.all` + real Postgres row locks, not mocked) — the available balance nets to the exact right amount in every ordering |
 | **Authenticated cron endpoint** | ✅ | `/api/cron/release-commissions`: constant-time secret comparison, verified live over HTTP — no auth → 401, wrong secret → 401, correct secret → 200 with a real run |
+| **Payout claiming** (`AVAILABLE → PAID`) | ✅ | `requestPayout`/`approvePayout`/`rejectPayout`/`markPayoutPaid`/`markPayoutFailed` — row-locked claiming (verified concurrent double-claim is impossible), correct TDS/net math against the DB's own CHECK constraint, one-open-payout-per-affiliate enforced by the database not application code, reject/fail unclaim entries for a fresh request with a fresh idempotency key (closes spec's own mistake #6). Full loop verified live over HTTP with real permission gating: 401/403/200 |
 | Rich-text sanitization at the read boundary | ✅ | Script tags, event handlers, `javascript:` hrefs all stripped |
 | Lint / typecheck / build | ✅ | `npm run lint` (`--max-warnings=0`), `npm run typecheck`, `npm run build` all pass clean, including the Next 16 `middleware` → `proxy` rename |
-| Test suite | ✅ | **144 tests across 14 files**, all passing against a live database (not the 1,044 the full spec calls for — see below) |
+| Test suite | ✅ | **153 tests across 15 files**, all passing against a live database (not the 1,044 the full spec calls for — see below) |
 | Ops scripts | ✅ | `ops/migrate.sh` and `ops/backup.sh` actually run in this environment; `ops/restore.sh` written but not exercised (nothing to restore yet) |
 | CVE remediation | ✅ | Bumped off Next.js 16.0.0 (CVE-2025-66478), drizzle-orm <0.45.2 (SQLi, GHSA-gpj5-g38j-94v9), and vitest's critical arbitrary-file-read chain; `npm audit` reports 0 high/critical |
 
@@ -54,6 +62,16 @@ function calls:
    the valid delivery → 200 `{"status":"already processed"}`.
 3. `POST /api/cron/release-commissions` — no `Authorization` header → 401;
    wrong secret → 401; correct secret → 200 with a real scheduler run.
+4. The full payout loop against a real running server with minted session
+   cookies for two different demo accounts: an AFFILIATE-role account
+   requesting a payout on ₹20,000 of qualifying orders → `{"grossPaise":
+   200000,"tdsPaise":10000,"netPaise":190000}`; that same account trying
+   to approve its own payout → 403 (lacks `payout.approve`); a
+   SUPER_ADMIN-role account approving → 200, then marking it paid with a
+   provider reference → 200; a repeat payout request while the first was
+   still open → 400 "No available commission to pay out." Verified in
+   Postgres afterward: the payout row is `PAID` with the exact TDS/net
+   split, and its claimed commission entry moved to `PAID` too.
 
 ## What's explicitly NOT built
 
@@ -98,39 +116,47 @@ function calls:
   the spec describes.
 - **Phase 11 — Production prep.** No `/api/health`, no `/api/ready`, no
   Sentry instrumentation.
-- **Phase 12 — Hardening.** The commission scheduler is real (see ✅
-  above). Still missing: no cron *schedule* wired up anywhere (the
-  endpoint exists and works, but nothing calls it on a timer — that's
-  infrastructure configuration, e.g. Vercel Cron or a system crontab, not
-  code, and is listed in `PRODUCTION-CHECKLIST.md`'s MANUAL CONFIGURATION
-  section); no `AVAILABLE → PAID` payout-claiming flow (an affiliate
-  cannot yet request a payout, so released money has nowhere to go yet);
+- **Phase 12 — Hardening.** The commission scheduler AND payout claiming
+  are both real now (see ✅ above) — an affiliate can earn, wait out the
+  hold, get released, request a payout, get approved, and get marked
+  paid, entirely for real. Still missing: no cron *schedule* wired up
+  anywhere (the endpoint exists and works, but nothing calls it on a
+  timer — that's infrastructure configuration, e.g. Vercel Cron or a
+  system crontab, not code, and is listed in
+  `PRODUCTION-CHECKLIST.md`'s MANUAL CONFIGURATION section); no real
+  RazorpayX/Cashfree disbursement — `markPayoutPaid` is a stand-in an
+  admin (or, today, anyone with `payout.approve`) calls manually, not a
+  webhook from an actual money-movement provider; no payout UI (an
+  affiliate calls the API directly today — there's no button anywhere);
   no MFA enrollment UI.
 - **Phase 13 — Real gateway verification.** Not applicable — no live
   Razorpay credentials or verified network path in this environment.
 
-## Scope note: the scheduler auto-approves; payout claiming doesn't exist yet
+## Scope note: the scheduler auto-approves; there's no UI, and disbursement is manual
 
-The spec's stated lifecycle is `PENDING → APPROVED → AVAILABLE → PAID`.
-This build's scheduler moves a matured, verified EARNING entry directly
-from `PENDING` to `AVAILABLE`, skipping a manual `APPROVED` gate — there
-is no admin UI to approve or hold a specific entry before release. This
-is a deliberate scope simplification, not an oversight: building that
-gate requires the admin dashboard (Phase 9), which doesn't exist.
+The spec's stated commission-entry lifecycle is
+`PENDING → APPROVED → AVAILABLE → PAID`. This build's scheduler moves a
+matured, verified EARNING entry directly from `PENDING` to `AVAILABLE`,
+skipping a manual `APPROVED` gate on the *entry* — there is no admin UI
+to approve or hold one specific entry before release. Separately, the
+`payouts` row itself does go through its own `REQUESTED → APPROVED → PAID`
+states (that part matches spec) — it's the earlier per-entry `APPROVED`
+step that's skipped. Building that gate requires the admin dashboard
+(Phase 9), which doesn't exist.
 
-Separately, reaching `AVAILABLE` means a balance now correctly shows as
-payable (`SUM(paise) WHERE status = 'AVAILABLE'` is no longer always
-zero — verified by tests), but there is still no code path that lets an
-affiliate request a payout or an admin approve one and move entries to
-`PAID`. The `payouts` table and its money invariants (one open payout per
-affiliate, `net = gross - tds`) were built and tested in an earlier
-session; claiming AVAILABLE entries into a payout is the next piece of
-work this unblocks.
+`markPayoutPaid` stands in for a real disbursement provider
+(RazorpayX/Cashfree Payouts, per `docs/ARCHITECTURE.md` §7) that isn't
+integrated — in this build, anyone holding `payout.approve` calls it
+directly with a made-up provider reference, rather than it being invoked
+by that provider's own webhook once a bank transfer actually clears.
+There is also no UI anywhere: every payout action in this session was
+driven by calling the API routes directly (`curl` with a session cookie),
+not a button an affiliate or admin would click.
 
 ## Test count vs. spec
 
 The spec describes 1,044 tests across 11 suites including a 115-attack
-security audit. This build has 144 tests across 14 files covering
+security audit. This build has 153 tests across 15 files covering
 everything listed as ✅ above. Extending toward the full suite requires
 the remaining phases to exist first — an audit test against an admin
 endpoint that doesn't exist would be a test of nothing.
@@ -156,14 +182,16 @@ still does not exist in any form.
 
 ## Immediate next steps, in priority order
 
-1. **Payout claiming** (`AVAILABLE → PAID`) — now that entries actually
-   reach AVAILABLE, this is the highest-leverage next step: an affiliate
-   requesting a payout, an admin approving it, and entries getting
-   claimed (`payoutId` set) and moved to PAID, respecting the existing
-   one-open-payout-per-affiliate invariant.
-2. **Phase 3 (affiliate lifecycle/KYC)** — real registration and
-   activation, so `createTestAffiliate(..., "ACTIVE")` in tests reflects
-   an actual reachable state rather than a direct insert.
+1. **Phase 3 (affiliate lifecycle/KYC)** — the biggest remaining gap now
+   that the entire money path (earn → hold → release → payout) is real:
+   there is still no way for a real person to actually become an
+   affiliate. Real registration and activation would also let
+   `createTestAffiliate(..., "ACTIVE")` in tests reflect an actual
+   reachable state rather than a direct insert.
+2. **A minimal payout UI** — the API is real and tested but nobody can
+   reach it without calling curl; even a plain HTML button on `/account`
+   for "request payout" (affiliate) and an approve/mark-paid list for
+   staff would make this session's work actually usable.
 3. **Phase 6 order-stage progression past PAID** (onboarding forms,
    requirements lock, team assignment) — unblocks the rest of Phase 7's
    CRM stage mapping, which is already written and tested for the stages

@@ -55,9 +55,19 @@ this environment (e.g. needs real credentials this session doesn't have).
   genuinely reaches AVAILABLE. ⚠️ Nothing calls this on a schedule yet —
   the endpoint exists and is verified live, but wiring an actual cron
   trigger (Vercel Cron, system crontab, etc.) is infrastructure
-  configuration, listed under MANUAL CONFIGURATION below. ⛔ No payout
-  *claiming* flow yet (`AVAILABLE → PAID`) — see STATUS.md's scope note;
-  released money has nowhere to go until that's built.
+  configuration, listed under MANUAL CONFIGURATION below.
+- ✅ Payout claiming (`AVAILABLE → PAID`) — built and verified: an
+  affiliate's request row-locks and claims every currently-AVAILABLE,
+  unclaimed entry for that affiliate before computing gross/TDS/net, so a
+  concurrent request for the same affiliate can never double-claim (real
+  `Promise.allSettled` race test — exactly one of two simultaneous
+  requests succeeds). Reject/fail unclaims entries with a fresh
+  idempotency key for the retry, closing the exact trap spec's own
+  mistake #6 names. Full loop verified live over HTTP with real
+  permission gating (`payout.request` vs `payout.approve`, minted session
+  cookies, not mocked): request → 200 with correct amounts, self-approve
+  attempt → 403, admin approve → 200, mark-paid → 200, DB confirms PAID
+  with the exact TDS split.
 - ✅ Partial refunds reverse a *proportional* share of commission, derived
   from the provider's cumulative `amount_refunded` (never a locally
   incremented counter) — verified: a second refund webhook with a larger
@@ -83,9 +93,14 @@ this environment (e.g. needs real credentials this session doesn't have).
   `PaymentGateway` interface only ever collects (`createOrder` +
   webhook); there is no split-settlement code path to accidentally reach
   for. `docs/ARCHITECTURE.md` §7 records the decision. ⛔ Disbursement
-  (RazorpayX/Cashfree Payouts) itself is not built — now that the
-  scheduler makes commission actually payable, this and payout-claiming
-  are the next real gap.
+  (RazorpayX/Cashfree Payouts) itself is not built — `markPayoutPaid` is
+  called directly by whoever holds `payout.approve`, not by a real
+  provider's webhook once money actually moved. This is the last real
+  gap between "the ledger is correct" and "an affiliate is actually paid
+  by a bank transfer."
+- ⛔ No payout UI anywhere — every payout action this session was driven
+  by calling the API routes directly with a session cookie. An affiliate
+  today has no button to click.
 - ⛔ `/api/ready` checking database, config, and the money-invariant
   indexes — not built (Phase 11).
 - ⚠️ Self-referral (an affiliate buying through their own link) is
