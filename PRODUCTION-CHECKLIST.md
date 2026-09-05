@@ -46,12 +46,18 @@ this environment (e.g. needs real credentials this session doesn't have).
   unknown email vs. wrong password) — verified with tests.
 - ⛔ MFA enforcement in the actor guard — not built (Phase 12). No
   enrollment UI exists, so no account can ever set `mfaEnabledAt`.
-- ⛔ Commission release scheduler with a dedicated-connection advisory
-  lock — not built (Phase 12). Every EARNING entry is written PENDING and
-  never advances to AVAILABLE, so nothing is currently payable to any
-  affiliate regardless of how much they've earned — see STATUS.md's
-  scope note. The earned/reversed *amounts* are correct and tested; only
-  the release mechanism is missing.
+- ✅ Commission release scheduler with a dedicated-connection advisory
+  lock — built and verified: two concurrent runs never both process the
+  same entries (real `Promise.all` test against real Postgres, not
+  mocked); each entry is re-verified from source (conversion status,
+  affiliate status, no payout claim) inside a row-locked transaction with
+  a repeated WHERE clause on the actual UPDATE. A held EARNING entry now
+  genuinely reaches AVAILABLE. ⚠️ Nothing calls this on a schedule yet —
+  the endpoint exists and is verified live, but wiring an actual cron
+  trigger (Vercel Cron, system crontab, etc.) is infrastructure
+  configuration, listed under MANUAL CONFIGURATION below. ⛔ No payout
+  *claiming* flow yet (`AVAILABLE → PAID`) — see STATUS.md's scope note;
+  released money has nowhere to go until that's built.
 - ✅ Partial refunds reverse a *proportional* share of commission, derived
   from the provider's cumulative `amount_refunded` (never a locally
   incremented counter) — verified: a second refund webhook with a larger
@@ -76,9 +82,10 @@ this environment (e.g. needs real credentials this session doesn't have).
 - ✅ Razorpay Route/split settlement avoided by design — the
   `PaymentGateway` interface only ever collects (`createOrder` +
   webhook); there is no split-settlement code path to accidentally reach
-  for. `docs/ARCHITECTURE.md` §7 records the decision. ⚠️ Disbursement
-  (RazorpayX/Cashfree Payouts) itself is not built — moot until the
-  Phase 12 scheduler makes anything payable.
+  for. `docs/ARCHITECTURE.md` §7 records the decision. ⛔ Disbursement
+  (RazorpayX/Cashfree Payouts) itself is not built — now that the
+  scheduler makes commission actually payable, this and payout-claiming
+  are the next real gap.
 - ⛔ `/api/ready` checking database, config, and the money-invariant
   indexes — not built (Phase 11).
 - ⚠️ Self-referral (an affiliate buying through their own link) is
@@ -103,6 +110,11 @@ this environment (e.g. needs real credentials this session doesn't have).
 
 ## MANUAL CONFIGURATION (required before go-live, not code)
 
+- A scheduled trigger calling `POST /api/cron/release-commissions` with
+  `Authorization: Bearer $CRON_SECRET` on an interval shorter than the
+  commission hold period (e.g. hourly against a 14-day hold) — Vercel
+  Cron, a system crontab, or equivalent. The endpoint itself is built and
+  verified; nothing calls it automatically yet.
 - Real `RAZORPAY_KEY_ID` / `RAZORPAY_KEY_SECRET` / `RAZORPAY_WEBHOOK_SECRET`
   from the live Razorpay dashboard, once the integration exists.
 - `SENTRY_DSN` and a Sentry project, once instrumentation exists.

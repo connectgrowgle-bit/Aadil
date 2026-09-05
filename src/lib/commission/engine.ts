@@ -1,14 +1,21 @@
 /**
- * The commission engine's write paths (Phase 4). Every write here goes
+ * The commission engine's write paths (Phase 4/12). Every write here goes
  * through a row-locked transaction on the conversion, so two concurrent
  * webhook deliveries for the same order can never both write an EARNING
  * entry, and a refund landing mid-computation can never race a capture.
  *
- * Scope note: Phase 12's scheduler (PENDING -> APPROVED -> AVAILABLE ->
- * PAID) is not built yet, so an EARNING entry's status is written as
- * PENDING and never advances in this build — see STATUS.md. The original
- * EARNING row's paise/type/conversionId are never mutated after creation
- * (Rule 2); only new REVERSAL rows are appended.
+ * Release lifecycle: an EARNING entry is written PENDING with a holdUntil
+ * timestamp; src/lib/commission/scheduler.ts is what moves it to AVAILABLE
+ * once matured and verified. A REVERSAL entry's initial status depends on
+ * whether its sibling EARNING has already been released: if the earning
+ * is still PENDING, the reversal is written PENDING too and the scheduler
+ * releases both together (so SUM(paise) WHERE status='AVAILABLE' is never
+ * transiently wrong — neither counts until release, then both do,
+ * netting correctly); if the earning is already AVAILABLE or PAID, the
+ * reversal is written AVAILABLE immediately, since that money already
+ * left the "held" state and the clawback must show up right away. The
+ * EARNING row's own paise/type/conversionId are never mutated after
+ * creation (Rule 2) — only its status advances, and only forward.
  */
 import { and, eq, desc } from "drizzle-orm";
 import { getDb } from "@/lib/db";
@@ -91,6 +98,13 @@ export async function confirmConversionAndEarn(orderId: string): Promise<Confirm
       10_000,
     );
 
+    // The hold period is read at capture time (when money is actually
+    // earned), not snapshotted earlier at click/pending time — a policy
+    // change affects only conversions not yet captured, which is the
+    // more defensible application point for a hold-period change.
+    const policy = await getActivePolicy();
+    const holdUntil = new Date(Date.now() + policy.holdPeriodDays * 24 * 60 * 60 * 1000);
+
     await tx
       .update(affiliateConversions)
       .set({ status: "CONFIRMED", updatedAt: new Date() })
@@ -104,6 +118,7 @@ export async function confirmConversionAndEarn(orderId: string): Promise<Confirm
         type: "EARNING",
         status: "PENDING",
         paise: earningPaise,
+        holdUntil,
       })
       .returning({ id: commissionEntries.id });
     if (!entry) throw new Error("failed to write EARNING entry");
@@ -154,10 +169,13 @@ export async function reverseProportionalShare(
       .limit(1);
     if (!conversion || conversion.status !== "CONFIRMED") return null;
 
+    // Locked in the same order the scheduler locks it (conversion, then
+    // earning), so the two paths can never deadlock against each other.
     const [earning] = await tx
       .select()
       .from(commissionEntries)
       .where(and(eq(commissionEntries.conversionId, conversion.id), eq(commissionEntries.type, "EARNING")))
+      .for("update")
       .limit(1);
     if (!earning) return null; // nothing was ever earned on this conversion
 
@@ -175,11 +193,17 @@ export async function reverseProportionalShare(
     const delta = targetReversal - alreadyReversed;
     if (delta <= 0) return { deltaPaise: 0 };
 
+    // If the earning has already been released (or paid out), the
+    // clawback must be visible in the available balance immediately.
+    // Otherwise it's written PENDING and the scheduler releases it
+    // alongside the earning once that matures — see the module doc.
+    const reversalStatus = earning.status === "AVAILABLE" || earning.status === "PAID" ? "AVAILABLE" : "PENDING";
+
     await tx.insert(commissionEntries).values({
       affiliateId: conversion.affiliateId,
       conversionId: conversion.id,
       type: "REVERSAL",
-      status: "REVERSED",
+      status: reversalStatus,
       paise: -delta,
       reversalOfEntryId: earning.id,
       reason: "proportional reversal from payment refund webhook",
